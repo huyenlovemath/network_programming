@@ -33,11 +33,12 @@ int main(int argc, char** argv)
 
 void HandleUserCommand(const char* command, bool* isrunning)
 {
-	int port = DEFAULT_PORT;
+	int* port;
 	char* p = NULL;
 	char port_str[6] = { 0 };
 	char topics[BUFFER_SIZE];
 	char* topic_name = NULL;
+	thread_t thread_id;
 
 	if (strstr("@START ", command) != NULL)
 	{
@@ -46,17 +47,28 @@ void HandleUserCommand(const char* command, bool* isrunning)
 			printf("[COMMAND FAILED]\tServer has already started\n");
 			return;
 		}
+
+		port = (int*)malloc(sizeof(int));
+
+		*port = DEFAULT_PORT;
 		if ((p = strstr("-port=", command)) != NULL)
 		{
 			strcpy(port_str, p + 6);
-			port = atoi(port_str);
+			*port = atoi(port_str);
 		}
 
-		*isrunning = true;
+		
 
 		InitAll();
-		StartServer(port);
 
+		if (pthread_create(&thread_id, NULL, ThreadStartServer, (void*)port) != 0)
+		{
+			perror("pthread_create");
+			close(server);
+			exit(1);
+		}
+		*isrunning = true;
+	
 		
 	}
 	else if (strstr("@ADD ", command) != NULL)
@@ -81,150 +93,167 @@ void HandleUserCommand(const char* command, bool* isrunning)
 		}
 
 	}
-	else
-	
-
-}
-void StartServer(int port)
-{
-
-}
-
-
-
-void AddNewTopic(const char* topic_name)
-{
-	PTOPIC new_topic = NULL;
-	size_t len;
-
-	if (!CheckTopicName(topic_name))
+	else if (strstr("@STOP ", command) != NULL)
 	{
-		printf("[ADD FAILED]\tTopic name %s is invalid\n", topic_name);
-		return;
-	}
+		if (!(*isrunning))
+		{
+			printf("[COMMAND FAILED]\tStart server firstly\n");
+			return;
+		}
 
-	// allocate mem for new topic instance
-
-	new_topic = (PTOPIC)malloc(sizeof(TOPIC));
-
-	// allocate and store name of topic
-
-	len = strlen(topic_name);
-	new_topic->topic_name = (char*)malloc(len + 1);
-	strcpy(new_topic->topic_name, topic_name);
-	new_topic->topic_name[len] = '\0';
-
-	// init mutex for sub_list adn pub_list
-
-	if (pthread_mutex_init(&new_topic->mutex_sub_list, NULL) != 0 || pthread_mutex_init(&new_topic->mutex_pub_list, NULL) != 0)
-	{
-		perror("topic mutex");
-		return;
+		ClearAll();
+		close(server_sock);
+		*isrunning = false;
+		printf("[SERVER STOP]");
 	}
 	
 
-	printf("[ADD TOPIC]\tTopic name %s create\n", topic_name);
-
-	// update topic_list
-	UpdateTopicsList(new_topic);
 }
-
-//
-// function checks if topic_name exists or doesnt
-// return yes if doesnt, it means that new topic_name is valid
-// 
-bool CheckTopicName(const char* topic_name)
+void* ThreadStartServer(void* lpPort)
 {
-	PTOPIC topic;
+	// thread safe
+	int port = *((int*)lpPort);
+	free(lpPort);
+	lpPort = NULL;
+	
+	pthread_detach(pthread_self());
 
-	if (!topic_name)
-		return false;
+	struct sockaddr_in serverAddr, clientAddr;
+	socklen_t clientAddrLen = sizeof(clientAddr);
+	const int opt = 1;
+	int* client_sock;
 
-	if (GetTopic(topic_name) == NULL)
-		//topic_name doesnt exist
-		return true;
-	else
-		//topic_name exists
-		return false;
+	bzero(&serverAddr, sizeof(serverAddr));
+	serverAddr.sin_family	= AF_INET;
+	serverAddr.sin_port = htons(port);
+	serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-}
-void UpdateTopicsList(PTOPIC new_topic)
-{
-	char current_topics[BUFFER_SIZE] = { 0 };
-	/* add to topics_list */
-
-	if (!new_topic)
-		return;
-
-	// mutex
-	pthread_mutex_lock(&mutex_topics_list);
-
-	topics_list.push_back(new_topic);
-
-	pthread_mutex_unlock(&mutex_topics_list);
-	//end mutex
-
-	printf("[UPDATE TOPICS]:\tAdd new topic to topics list\n");
-	GetCurrentTopics(current_topics);
-
-}
-
-//
-// get string of all topic_names split by ',' 
-// topic_name1,topic_name2,topic_name3
-//
-void GetCurrentTopics(char* current_topics_str)
-{
-	PTOPIC topic;
-
-	// mutex
-	pthread_mutex_lock(&mutex_topics_list);
-
-	for (int i = 0; i < topics_list.size(); i++)
+	if ((server = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 	{
-		topic = topics_list.at(i);
-
-		if (i)
-			strcat(current_topics, ",");
-		strcat(current_topics, topic->topic_name);
+		perror("socket");
+		exit(1);
 	}
-	
-	pthread_mutex_unlock(&mutex_topics_list);
-	
-	//end mutex
 
-	printf("[CURRENT TOPICS]:\t%s", current_topics);
-}
-
-//
-// Return pointer to topic which has topic_name, NULL if topic_name doesn't exist
-//
-
-PTOPIC GetTopic(char* topic_name)
-{
-	PTOPIC topic = NULL;
-
-	// mutex
-	pthread_mutex_lock(&mutex_topics_list);
-
-	for (int i = 0; i < topics_list.size(); i++)
+	setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+	if (bind(server, (sockaddr*)&serverAddr, sizeof(serverAddr)) < 0)
 	{
-		topic = topics_list.at(i);
+		perror("bind");
+		exit(1);
+	}
 
-		if (!strcmp(topic->topic_name, topic_name))
+	if (listen(server, SOMAXCONN) < 0)
+	{
+		perror("listen");
+		exit(1);
+	}
+
+	printf("[START SERVER]\tServer start listening at port %d\n", port);
+
+	while (true)
+	{
+		client_sock = (int*)malloc(sizeof(int));
+
+		if ((*client_sock = accept(server, (sockaddr*)&clientAddr, &clientAddrLen)) < 0)
+		{
+			//perror("accept");
 			break;
+		}
 
-		if (i == topics_list.size() - 1)
-			topic = NULL;
+		printf("[CONNECTION]\t New connection from client [%s:%d]\n", inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
+
+		// create thread for each client
+
+		pthread_t tid;
+
+		if (pthread_create(&tid, NULL, ThreadHandleClient, (void*)client_sock) != 0)
+		{
+			perror("pthread_create");
+			free(client);
+			continue;
+		}
 	}
 
-	pthread_mutex_unlock(&mutex_topics_list);
-
-	//end mutex
-	return topic;
 
 }
-void FreeTopic(PTOPIC topic)
+
+void* ThreadHandleClient(void* lpClientSock)
 {
-	free
+	int client_sock = *((int*)lpClientSock);
+	free(lpClientSock);
+	lpClientSock = NULL;
+
+	pthread_detach(pthread_self());
+
+	Status status = ESTABLISH;
+	char sendBuf[BUFFER_SIZE];
+	char recvBuf[BUFFER_SIZE];
+	PCLIENT client;
+
+	client = (PCLIENT)malloc(sizeof(CLIENT));
+	client->client_sock = client_sock;
+
+	while (true)
+	{
+		
+		if (!handleRead)
+		switch (status)
+		{
+		case ESTABLISH:
+
+			break;
+		case REGISTRY:
+			break;
+		case EXCHANGE:
+			break;
+		default:
+			break;
+		}
+	}
+	
+
+	
+
 }
+
+bool handleRead(PCLIENT client, char* buffer, int bufSize)
+{
+	int nBytes;
+	nBytes = read(client, buffer, bufSize - 1);
+	if (nBytes < 0)
+	{
+		close(client);
+		perror("read");
+		exit(1);
+	}
+	if (nBytes == 0)
+	{
+		printf("[Client may close]\n");
+		close(client);
+		return false;
+	}
+	buffer[nBytes] = '\0';
+	printf(">CLIENT:%s\n", buffer);
+	return true;
+
+}
+
+void InitAll()
+{
+	// init mutex for topics and clients list
+	pthread_mutex_init(&mutex_topics_list);
+	pthread_mutex_init(&mutex_clients_list);
+
+}
+void ClearAll()
+{
+
+	FreeAllClients();
+	FreeAllTopics();
+
+	// destroy mutex for topics list and client list
+	pthread_mutex_destroy(&mutex_topics_list);
+	pthread_mutex_destroy(&mutex_clients_list);
+
+}
+
+

@@ -35,18 +35,22 @@
 #define	DISCONACK			'e'
 
 enum ClientType {
-	UNDEFINED,
-	PRODUCER,
-	CUSTOMER
+	PUBLISHER,
+	SUBSCRIBER
 };
 
+enum Status {
+	ESTABLISH,			/* establish connection between server and client (HELLO) */
+	REGISTRY,			/* registry with clientID and role Producer or Subscriber  */
+	EXCHANGE
+};
 /*--------------------------------- CUSTOM STRUCTURE-------------------------*/
 
 typedef struct CLIENT {
 	
 	char*		client_id;
 	int			client_sock;
-	ClientType	type = UNDEFINED;
+	ClientType	type;
 
 	// mutex_write for writing message to consumer_sock_fd (multi thread_topic can write at the same time) 
 	// only init this mutex if type is CONSUMER
@@ -68,13 +72,21 @@ typedef struct TOPIC
 
 	// list pointers pointing to all subcribers of this topic
 	// multi subcribers can request update their sub_topic at the same time
+
+	std::vector<PCLIENT> sub_list;		
+
+	// mutex for reading and writing to sub_list, init at AddNewTopic() and destroy at FreeAllTopics()
 	pthread_mutex_t mutex_sub_list;
-	std::vector<PCLIENT> sub_list;				
-	
+
+
 	// list pointers pointing to all publishers of this topic
 	// multi publisher can request update their pub_topic at the same time
-	pthread_mutex_t mutex_pub_list;
+
 	std::vector<PCLIENT> pub_list;
+
+	// mutex for reading and writing to pub_list, init at AddNewTopic() and destroy at FreeAllTopics()
+	pthread_mutex_t mutex_pub_list;
+	
 
 	// queue of message, is written by publishers, and is read and deleted by thread_topic to send to all subcribers
 	pthread_mutex_t mutex_msg_queue;
@@ -86,6 +98,8 @@ typedef struct TOPIC
 
 /*--------------------------------- GLOBAL VARIABLES-------------------------*/
 
+// server socket to listen connection
+int server_sock;
 
 // list clients
 // mutex list clients
@@ -116,9 +130,9 @@ void HandleUserCommand(const char* command, bool* isrunning);
 void InitAll();
 
 //
-// start server listen at a port (default 9999)
-//
-void StartServer(int port);
+// thread start server and listen connection
+void* ThreadStartServer(void* lpPort);
+void* ThreadHandleClient(void* lpClientSock);
 
 
 /* after command @stop */
@@ -126,13 +140,7 @@ void StartServer(int port);
 //
 // clear all if command is STOP: close all mutex, socket, free memory
 //
-void ClearAll()
-{
-
-	freeAllTopics();
-	freeAllClients();
-}
-
+void ClearAll();
 
 
 
@@ -144,7 +152,7 @@ void AddNewClient(PCLIENT pClient, char* client_id, int client_sock, ClientType 
 
 /* TOPIC */
 PTOPIC	GetTopic(const char* topic_name);
-void	FreeTopic(PTOPIC topic);
+//void	FreeTopic(PTOPIC topic);
 void	FreeAllTopics();
 
 bool	CheckTopicName(const char* topic_name);
