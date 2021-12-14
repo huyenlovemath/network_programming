@@ -44,9 +44,9 @@ enum ClientType {
 
 typedef struct CLIENT {
 	
-	char* user_id;
-	int client_sock;
-	ClientType type = UNDEFINED;
+	char*		client_id;
+	int			client_sock;
+	ClientType	type = UNDEFINED;
 
 	// mutex_write for writing message to consumer_sock_fd (multi thread_topic can write at the same time) 
 	// only init this mutex if type is CONSUMER
@@ -95,13 +95,60 @@ pthread_mutex_t mutex_clients_list;
 
 
 
-// list topics
+// list current topics
 std::vector<PTOPIC> topics_list;
+pthread_mutex_t mutex_topics_list;
 
-// this program dont support deleting topic, so store current topics list in string for easily send to clients when they request
-// when add a new topic, append topic_name to the end
-// split by ',' 
-// topic_name1,topic_name2,topic_name3
 
-char[BUFFER_SIZE] current_topics_str;
-pthread_mutex_t mutex_current_topics_str;
+/*--------------------------------- FUNCTION-------------------------*/ /
+
+//
+// handle each command from keyboard
+//
+void HandleUserCommand(const char* command, bool* isrunning);
+
+
+/* after command @start */
+
+//
+// init mutex 
+//
+void InitAll();
+
+//
+// start server listen at a port (default 9999)
+//
+void StartServer(int port);
+
+
+/* after command @stop */
+
+//
+// clear all if command is STOP: close all mutex, socket, free memory
+//
+void ClearAll()
+{
+
+	freeAllTopics();
+	freeAllClients();
+}
+
+
+
+
+/* CLIENT */
+void FreeClient(int client_sock);
+void FreeAllClients();
+
+void AddNewClient(PCLIENT pClient, char* client_id, int client_sock, ClientType type);
+
+/* TOPIC */
+PTOPIC	GetTopic(const char* topic_name);
+void	FreeTopic(PTOPIC topic);
+void	FreeAllTopics();
+
+bool	CheckTopicName(const char* topic_name);
+void	AddNewTopic(const char* topic_name);
+void	UpdateTopicsList(PTOPIC new_topic);
+
+void	GetCurrentTopics(char* current_topics_str);

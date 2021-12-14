@@ -1,5 +1,5 @@
 
-#include "server.h"
+#include "common.h"
 
 
 
@@ -53,6 +53,8 @@ void HandleUserCommand(const char* command, bool* isrunning)
 		}
 
 		*isrunning = true;
+
+		InitAll();
 		StartServer(port);
 
 		
@@ -72,13 +74,14 @@ void HandleUserCommand(const char* command, bool* isrunning)
 			topic_name = strtok(topics, ",");
 			while (topic_name != NULL)
 			{
-				Topic_AddNew(topic);
+				AddNewTopic(topic_name);
 				topic_name = strtok(NULL, ",");
 			}
 
 		}
 
 	}
+	else
 	
 
 }
@@ -86,21 +89,142 @@ void StartServer(int port)
 {
 
 }
-void Topic_AddNew (const char* topic_name)
+
+
+
+void AddNewTopic(const char* topic_name)
 {
 	PTOPIC new_topic = NULL;
+	size_t len;
+
+	if (!CheckTopicName(topic_name))
+	{
+		printf("[ADD FAILED]\tTopic name %s is invalid\n", topic_name);
+		return;
+	}
+
+	// allocate mem for new topic instance
+
+	new_topic = (PTOPIC)malloc(sizeof(TOPIC));
+
+	// allocate and store name of topic
+
+	len = strlen(topic_name);
+	new_topic->topic_name = (char*)malloc(len + 1);
+	strcpy(new_topic->topic_name, topic_name);
+	new_topic->topic_name[len] = '\0';
+
+	// init mutex for sub_list adn pub_list
+
+	if (pthread_mutex_init(&new_topic->mutex_sub_list, NULL) != 0 || pthread_mutex_init(&new_topic->mutex_pub_list, NULL) != 0)
+	{
+		perror("topic mutex");
+		return;
+	}
 	
 
+	printf("[ADD TOPIC]\tTopic name %s create\n", topic_name);
+
 	// update topic_list
-	Topic_UpdateTopicsList(new_topic);
+	UpdateTopicsList(new_topic);
 }
 
-void Topic_UpdateTopicsList(PTOPIC new_topic)
+//
+// function checks if topic_name exists or doesnt
+// return yes if doesnt, it means that new topic_name is valid
+// 
+bool CheckTopicName(const char* topic_name)
 {
-	// mutex
+	PTOPIC topic;
 
-	// write to list
+	if (!topic_name)
+		return false;
+
+	if (GetTopic(topic_name) == NULL)
+		//topic_name doesnt exist
+		return true;
+	else
+		//topic_name exists
+		return false;
+
+}
+void UpdateTopicsList(PTOPIC new_topic)
+{
+	char current_topics[BUFFER_SIZE] = { 0 };
+	/* add to topics_list */
+
+	if (!new_topic)
+		return;
+
+	// mutex
+	pthread_mutex_lock(&mutex_topics_list);
+
+	topics_list.push_back(new_topic);
+
+	pthread_mutex_unlock(&mutex_topics_list);
 	//end mutex
 
+	printf("[UPDATE TOPICS]:\tAdd new topic to topics list\n");
+	GetCurrentTopics(current_topics);
 
+}
+
+//
+// get string of all topic_names split by ',' 
+// topic_name1,topic_name2,topic_name3
+//
+void GetCurrentTopics(char* current_topics_str)
+{
+	PTOPIC topic;
+
+	// mutex
+	pthread_mutex_lock(&mutex_topics_list);
+
+	for (int i = 0; i < topics_list.size(); i++)
+	{
+		topic = topics_list.at(i);
+
+		if (i)
+			strcat(current_topics, ",");
+		strcat(current_topics, topic->topic_name);
+	}
+	
+	pthread_mutex_unlock(&mutex_topics_list);
+	
+	//end mutex
+
+	printf("[CURRENT TOPICS]:\t%s", current_topics);
+}
+
+//
+// Return pointer to topic which has topic_name, NULL if topic_name doesn't exist
+//
+
+PTOPIC GetTopic(char* topic_name)
+{
+	PTOPIC topic = NULL;
+
+	// mutex
+	pthread_mutex_lock(&mutex_topics_list);
+
+	for (int i = 0; i < topics_list.size(); i++)
+	{
+		topic = topics_list.at(i);
+
+		if (!strcmp(topic->topic_name, topic_name))
+			break;
+
+		if (i == topics_list.size() - 1)
+			topic = NULL;
+	}
+
+	pthread_mutex_unlock(&mutex_topics_list);
+
+	//end mutex
+	return topic;
+
+}
+void FreeTopic(PTOPIC topic)
+{
+	free
 }
