@@ -46,6 +46,7 @@ enum Status {
 };
 /*--------------------------------- CUSTOM STRUCTURE-------------------------*/
 
+
 typedef struct CLIENT {
 	
 	char*		client_id;
@@ -53,11 +54,14 @@ typedef struct CLIENT {
 	ClientType	type;
 
 	// mutex_write for writing message to consumer_sock_fd (multi thread_topic can write at the same time) 
-	// only init this mutex if type is CONSUMER
 	pthread_mutex_t mutex_write;
 
+	// for thread-safe
+	pthread_key_t readline_key;
+
 	// may be written by request of CHANGESUB/CHANGEPUB and be read to specify which topics received message from publishers
-	pthread_mutex_t mutex_follow_topics_list;
+	pthread_mutex_t mutex_follow_topics_list;		
+
 
 	// list pointers pointing to all topics which this client follows (publish_topic for producer, subcribe_topic for customer)
 	// update after client send request "CHANGESUB/CHANGEPUB"
@@ -70,22 +74,15 @@ typedef struct TOPIC
 {
 	char* topic_name;
 
-	// list pointers pointing to all subcribers of this topic
-	// multi subcribers can request update their sub_topic at the same time
+	
 
-	std::vector<PCLIENT> sub_list;		
+	// list pointers pointing to all publishers and subscribers of this topic
+	// multi clients can request update their following-topic at the same time
 
-	// mutex for reading and writing to sub_list, init at AddNewTopic() and destroy at FreeAllTopics()
-	pthread_mutex_t mutex_sub_list;
+	std::vector<PCLIENT> clients_list;
 
-
-	// list pointers pointing to all publishers of this topic
-	// multi publisher can request update their pub_topic at the same time
-
-	std::vector<PCLIENT> pub_list;
-
-	// mutex for reading and writing to pub_list, init at AddNewTopic() and destroy at FreeAllTopics()
-	pthread_mutex_t mutex_pub_list;
+	// mutex for reading and writing to clients_list, init at AddNewTopic() and destroy at FreeAllTopics()
+	pthread_mutex_t clients_list;
 	
 
 	// queue of message, is written by publishers, and is read and deleted by thread_topic to send to all subcribers
@@ -122,7 +119,7 @@ pthread_mutex_t mutex_topics_list;
 void HandleUserCommand(const char* command, bool* isrunning);
 
 
-/* after command @start */
+/* START */
 
 //
 // init mutex 
@@ -131,26 +128,29 @@ void InitAll();
 
 //
 // thread start server and listen connection
+//
 void* ThreadStartServer(void* lpPort);
 void* ThreadHandleClient(void* lpClientSock);
 
 
-/* after command @stop */
-
-//
-// clear all if command is STOP: close all mutex, socket, free memory
-//
-void ClearAll();
-
-
 
 /* CLIENT */
+
 void FreeClient(int client_sock);
 void FreeAllClients();
 
-void AddNewClient(PCLIENT pClient, char* client_id, int client_sock, ClientType type);
+void AddNewClient(PCLIENT pClient, char* client_id, ClientType type, char* topics);
+
+
+
+/* READ&WRITE SAFE */
+
+bool HandleRead(PCLIENT client, char* buffer, int bufSize);
+bool HandleWrite(PCLIENT client, char* buffer);
+
 
 /* TOPIC */
+
 PTOPIC	GetTopic(const char* topic_name);
 //void	FreeTopic(PTOPIC topic);
 void	FreeAllTopics();
@@ -160,3 +160,10 @@ void	AddNewTopic(const char* topic_name);
 void	UpdateTopicsList(PTOPIC new_topic);
 
 void	GetCurrentTopics(char* current_topics_str);
+
+/* STOP */
+
+//
+// clear all if command is STOP: close all mutex, socket, free memory
+//
+void ClearAll();
